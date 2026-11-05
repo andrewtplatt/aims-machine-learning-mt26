@@ -16,4 +16,4 @@ Basic VAE implementation. This notebook trains a basic Gaussian VAE on the MNIST
 #### Part 3
 Implement and train a CNN classifier for CIFAR-10 image dataset, following the [official PyTorch tutorial](https://pytorch.org/tutorials/beginner/blitz/cifar10_tutorial.html).
 
-- Open the tutorial on [Colab](https://colab.research.google.com/github/pytorch/tutorials/blob/gh-pages/_downloads/17a7c7cb80916fcdf921097825a0f562/cifar10_tutorial.ipynb)
+- The tutorial on [Colab](https://colab.research.google.com/github/pytorch/tutorials/blob/gh-pages/_downloads/17a7c7cb80916fcdf921097825a0f562/cifar10_tutorial.ipynb)
