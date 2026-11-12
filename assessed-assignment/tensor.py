@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterator, Sequence
 from typing import Union
 
 import numpy as np
@@ -33,6 +33,10 @@ class Tensor:
         """
         return self._data
 
+    @property
+    def shape(self) -> tuple:
+        return self._data.shape
+
     def all(self) -> bool:
         return self._data.all()  # pyright: ignore[reportReturnType]
 
@@ -48,11 +52,20 @@ class Tensor:
         out._backward = _backward
         return out
 
-    def sum(self, axis=None) -> Tensor:
-        out = Tensor(np.sum(self._data, axis=axis, keepdims=True), (self,))
+    def argmax(self, axis=None) -> Tensor:
+        out = Tensor(np.argmax(self._data, axis=axis, keepdims=False))  # pyright: ignore[reportArgumentType]
+        return out
+
+    def sum(self, axis=None, keepdims=False) -> Tensor:
+        out = Tensor(np.sum(self._data, axis=axis, keepdims=keepdims), (self,))
 
         def _backward():
-            self.grad += out.grad
+            grad = out.grad
+
+            if axis is not None and not keepdims:
+                grad = np.expand_dims(grad, axis=axis)
+
+            self.grad += np.broadcast_to(grad, self._data.shape)
 
         out._backward = _backward
         return out
@@ -60,40 +73,44 @@ class Tensor:
     def copy(self) -> Tensor:
         return Tensor(self._data.copy())
 
+    def item(self) -> float | int | bool:
+        return self._data.item()
+
     def backward(self):
-
-        # topological order all of the children in the graph
         topo = []
-        visited = set()
+        visited: set[Tensor] = {self}
+        stack: list[tuple[Tensor, Iterator[Tensor]]] = [(self, iter(self._prev))]
 
-        def build_topo(v: Tensor):
-            # this needs to fill topo with the nodes in a topological ordering of the graph
-            # so we can visit them and call their _backward() in the correct order
+        while stack:
+            node, children = stack[-1]
 
-            # non-recursive implementation to avoid... issues.
-            stack = [v]
-            while len(stack) != 0:
-                node = stack[-1]
-                if len(node._prev) == 0 or all(x in visited for x in node._prev):
-                    topo.append(node)
-                    stack.pop()
-                for child in node._prev:
-                    if child not in visited:
-                        stack.append(child)
-                visited.add(node)
+            try:
+                child = next(children)
 
-        build_topo(self)
+                if child not in visited:
+                    visited.add(child)
+                    stack.append((child, iter(child._prev)))
 
-        # go one variable at a time and apply the chain rule to get its gradient
-        self.grad = np.ones_like(self.grad, dtype=float)
-        for v in reversed(topo):
-            v._backward()
+            except StopIteration:
+                topo.append(node)
+                stack.pop()
+
+        if self._data.size != 1:
+            raise ValueError("backward() requires a scalar loss")
+
+        self.grad = np.ones_like(self._data, dtype=float)
+
+        for node in reversed(topo):
+            node._backward()
 
     def __repr__(self) -> str:
         return repr(self._data)
 
     def __str__(self) -> str:
         return str(self._data)
+
+    def __len__(self) -> int:
+        return len(self._data)
 
     def __add__(self, other: TensorInput) -> Tensor:
         """
@@ -146,7 +163,6 @@ class Tensor:
 
         def _backward():
             self.grad += other * (self._data ** (other - 1)) * out.grad
-            ## TODO AP: check other.grad += self.data ** other.data * math.log(self.data)
 
         out._backward = _backward
 
@@ -163,6 +179,25 @@ class Tensor:
 
         out._backward = _backward
         return out
+
+    def log(self) -> Tensor:
+        """
+        Element-wise natural logarithm of a tensor
+        """
+        out = Tensor(np.log(self._data), (self,))
+
+        def _backward():
+            self.grad += out.grad / self._data
+
+        out._backward = _backward
+        return out
+
+    def gradient_descend(self, lr: float):
+        """
+        Perform a gradient descent step with the given learning rate.
+        Assumes that the gradient has already been backpropagated.
+        """
+        self._data -= lr * self.grad
 
     def __gt__(self, other: TensorInput) -> Tensor:
         other = _op_convert(other)
@@ -181,13 +216,22 @@ class Tensor:
         return ~(other > self)
 
     def eq(self, other: TensorInput) -> Tensor:
+        """
+        Element-wise equality of a tensor
+        """
         other = _op_convert(other)
         return Tensor(self._data == other._data)
 
     def neq(self, other: TensorInput) -> Tensor:
+        """
+        Element-wise inequality of a tensor
+        """
         return ~self.eq(other)
 
     def __invert__(self) -> Tensor:
+        """
+        Element-wise inversion of a tensor (usually for booleans...)
+        """
         out = Tensor(~self._data, (self,))
 
         def _backward():
@@ -200,6 +244,9 @@ class Tensor:
         return self * -1
 
     def __matmul__(self, other: TensorInput) -> Tensor:
+        """
+        Matrix multiplication of two tensors
+        """
         other = _op_convert(other)
         out = Tensor(self._data @ other._data, (self, other))
 
